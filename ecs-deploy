@@ -4,7 +4,7 @@
 CLUSTER=false
 SERVICE=false
 TASK_DEFINITION=false
-TASK_DEFINITION_ARN=false
+TASK_DEFINITION_FILE=false
 MAX_DEFINITIONS=0
 IMAGE=false
 MIN=false
@@ -38,7 +38,7 @@ Required arguments:
                                  Examples: mariadb, mariadb:latest, silintl/mariadb,
                                            silintl/mariadb:latest, private.registry.com:8000/repo/image:tag
     --aws-instance-profile  Use the IAM role associated with this instance
-    -dn | --task-definition-arn  ARN of task definition to deploy
+    -df | --task-definition-file  JSON file of task definition to deploy
 
 Optional arguments:
     -D | --desired-count    The number of instantiations of the task to place and keep running in your service.
@@ -120,10 +120,6 @@ function assertRequiredArgumentsSet() {
     if [ $SERVICE != false ] && [ $CLUSTER == false ]; then
         echo "CLUSTER is required. You can pass the value using -c or --cluster"
         exit 7
-    fi
-    if [ $IMAGE == false ]; then
-        echo "IMAGE is required. You can pass the value using -i or --image"
-        exit 8
     fi
     if ! [[ $MAX_DEFINITIONS =~ ^-?[0-9]+$ ]]; then
         echo "MAX_DEFINITIONS must be numeric, or not defined."
@@ -242,7 +238,9 @@ function parseImageName() {
 function getCurrentTaskDefinition() {
     if [ $SERVICE != false ]; then
       # Get current task definition name from service
-      if [ $TASK_DEFINITION_ARN == false ]; then
+      if [ $TASK_DEFINITION_FILE == true ]; then
+        TASK_DEFINITION_ARN=`$AWS_ECS  register-task-definition --cli-input-json $TASK_DEFINITION_FILE | jq -r .taskDefinition.taskDefinitionArn`
+      else
         TASK_DEFINITION_ARN=`$AWS_ECS describe-services --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition`
       fi
       TASK_DEFINITION=`$AWS_ECS describe-task-definition --task-def $TASK_DEFINITION_ARN`
@@ -285,6 +283,34 @@ function createNewTaskDefJson() {
       echo $NEW_DEF
     fi
 }
+
+function filterTaskDefJson() {
+    # Get a JSON representation of the current task definition
+    # + Filter the def
+    DEF=$( echo "$TASK_DEFINITION" | jq '.taskDefinition' )
+
+    # Default JQ filter for new task definition
+    NEW_DEF_JQ_FILTER="family: .family, volumes: .volumes, containerDefinitions: .containerDefinitions"
+
+    # Some options in task definition should only be included in new definition if present in
+    # current definition. If found in current definition, append to JQ filter.
+    CONDITIONAL_OPTIONS=(networkMode taskRoleArn placementConstraints)
+    for i in "${CONDITIONAL_OPTIONS[@]}"; do
+      re=".*${i}.*"
+      if [[ "$DEF" =~ $re ]]; then
+        NEW_DEF_JQ_FILTER="${NEW_DEF_JQ_FILTER}, ${i}: .${i}"
+      fi
+    done
+
+    # Build new DEF with jq filter
+    NEW_DEF=$(echo $DEF | jq "{${NEW_DEF_JQ_FILTER}}")
+
+    # If in test mode output $NEW_DEF
+    if [ "$BASH_SOURCE" != "$0" ]; then
+      echo $NEW_DEF
+    fi
+}
+
 
 function registerNewTaskDefinition() {
     # Register the new task definition, and store its ARN
@@ -462,8 +488,8 @@ if [ "$BASH_SOURCE" == "$0" ]; then
                 TASK_DEFINITION="$2"
                 shift
                 ;;
-            -dn|--task-definition-arn)
-                TASK_DEFINITION_ARN="$2"
+            -df|--task-definition-file)
+                TASK_DEFINITION_FILE="$2"
                 shift
                 ;;
             -i|--image)
@@ -519,16 +545,22 @@ if [ "$BASH_SOURCE" == "$0" ]; then
     # Check that required arguments are provided
     assertRequiredArgumentsSet
 
-    # Determine image name
-    parseImageName
-    echo "Using image name: $useImage"
+    if ! [[ $IMAGE == false ]]; then
+        # Determine image name
+        parseImageName
+        echo "Using image name: $useImage"
+    fi
 
     # Get current task definition
     getCurrentTaskDefinition
     echo "Current task definition: $TASK_DEFINITION_ARN";
 
     # create new task definition json
-    createNewTaskDefJson
+    if ! [[ $IMAGE == false ]]; then
+      createNewTaskDefJson
+    else
+      filterTaskDefJson
+    fi
 
     # register new task definition
     registerNewTaskDefinition
