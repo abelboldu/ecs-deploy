@@ -18,7 +18,7 @@ Usage
         -n | --service-name           Name of service to deploy
 
     Optional arguments:
-	    -df | --task-definition-file  JSON file of task definition to deploy
+	      -f | --task-definition-file   JSON file of task definition to deploy
         -i | --image                  Name of Docker image to run, ex: repo/image:latest
                                       Format: [domain][:port][/repo][/][image][:tag]
                                       Examples: mariadb, mariadb:latest, silintl/mariadb,
