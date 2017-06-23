@@ -16,12 +16,13 @@ Usage
            | --aws-instance-profile   Use the IAM role associated with the current AWS instance. Can only be used from within a running AWS instance. If you set this, aws-access-key and aws-secret-key are not needed
         -c | --cluster                Name of ECS cluster
         -n | --service-name           Name of service to deploy
+
+    Optional arguments:
+	    -df | --task-definition-file  JSON file of task definition to deploy
         -i | --image                  Name of Docker image to run, ex: repo/image:latest
                                       Format: [domain][:port][/repo][/][image][:tag]
                                       Examples: mariadb, mariadb:latest, silintl/mariadb,
                                                 silintl/mariadb:latest, private.registry.com:8000/repo/image:tag
-
-    Optional arguments:
         -D | --desired-count          The number of instantiations of the task to place and keep running in your service.
         -m | --min                    minumumHealthyPercent: The lower limit on the number of running tasks during a deployment. (default: 100)
         -M | --max                    maximumPercent: The upper limit on the number of running tasks during a deployment. (default: 200)
@@ -79,7 +80,7 @@ _Naturally, enough computing resources must be available in the ECS cluster for 
 Consequently, all that is needed to deploy a new version of an application is to update the Service which is running its
 Tasks to point at a new version of the Task Definition. `ecs-deploy` uses the python `aws` utility to do this. It,
 
-  * Pulls the JSON representation of the in-use Task Definition
+  * Pulls the JSON representation of the in-use Task Definition or the provided file
   * Edits it
   * Defines a new version, with the changes
   * Updates the Service to use the new version
@@ -88,6 +89,7 @@ Tasks to point at a new version of the Task Definition. `ecs-deploy` uses the py
 The second step merits more explanation: since a Task Definition [may] define multiple containers, the question arises, "what
 must be changed to create a new revision?" Empirically, the surprising answer is nothing; Amazon allows you to create a new
 but identical version of a Task Definition, and the Service will still do a blue/green deployment of identical tasks.
+If you don't provide any image parameter, that will be the case.
 
 Nevertheless, since the system uses docker, the assumption is that improvements to the application are built into
 its container images, which are then pushed into a repository (public or private), to then be pulled down for use by ECS. This
