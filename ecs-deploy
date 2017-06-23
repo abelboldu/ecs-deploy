@@ -238,8 +238,9 @@ function parseImageName() {
 function getCurrentTaskDefinition() {
     if [ $SERVICE != false ]; then
       # Get current task definition name from service
-      if [ $TASK_DEFINITION_FILE == true ]; then
-        TASK_DEFINITION_ARN=`$AWS_ECS  register-task-definition --cli-input-json $TASK_DEFINITION_FILE | jq -r .taskDefinition.taskDefinitionArn`
+      if [ $TASK_DEFINITION_FILE != false ]; then
+        echo "Using task file: $TASK_DEFINITION_FILE"
+        TASK_DEFINITION_ARN=`$AWS_ECS  register-task-definition --cli-input-json file://$TASK_DEFINITION_FILE | jq -r .taskDefinition.taskDefinitionArn`
       else
         TASK_DEFINITION_ARN=`$AWS_ECS describe-services --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition`
       fi
