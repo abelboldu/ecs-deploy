@@ -21,6 +21,9 @@ function usage() {
     cat <<EOM
 ##### ecs-deploy #####
 Simple script for triggering blue/green deployments on Amazon Elastic Container Service
+Custom fork:
+https://github.com/abelboldu/ecs-deploy
+Original project:
 https://github.com/silinternational/ecs-deploy
 
 Required arguments:
@@ -179,6 +182,9 @@ function parseImageName() {
           exit 12
         fi
         tag=${BASH_REMATCH[2]}
+        port=''
+        repo=''
+        domain=''
       else
         echo "Unable to parse image name: $IMAGE, check the format and try again"
         exit 13
@@ -233,17 +239,40 @@ function parseImageName() {
     fi
 }
 
+
+
 function getCurrentTaskDefinition() {
     if [ $SERVICE != false ]; then
       # Get current task definition name from service
-      if [ $TASK_DEFINITION_FILE != false ]; then
-        echo "Using task file: $TASK_DEFINITION_FILE"
-        TASK_DEFINITION_ARN=`$AWS_ECS  register-task-definition --cli-input-json file://$TASK_DEFINITION_FILE | jq -r .taskDefinition.taskDefinitionArn`
-      else
-        TASK_DEFINITION_ARN=`$AWS_ECS describe-services --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition`
-      fi
+      TASK_DEFINITION_ARN=`$AWS_ECS describe-services --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition`
       TASK_DEFINITION=`$AWS_ECS describe-task-definition --task-def $TASK_DEFINITION_ARN`
     fi
+}
+
+function getTaskDefinitionByFile() {
+    if [ $TASK_DEFINITION_FILE != false ]; then
+      TASK_DEFINITION=`cat $TASK_DEFINITION_FILE`
+    fi
+}
+
+
+function updateFileJson() {
+    # + Update definition file to use new image name, with 'filtered' format
+
+    if [[ "x$TAGONLY" == "x" ]]; then
+      DEF=$( echo "$TASK_DEFINITION" \
+            | sed -e "s|\"image\": *\"${imageWithoutTag}:.*\"|\"image\": \"${useImage}\"|g" \
+            | sed -e "s|\"image\": *\"${imageWithoutTag}\"|\"image\": \"${useImage}\"|g" )
+    else
+      DEF=$( echo "$TASK_DEFINITION" \
+            | sed -e "s|\(\"image\": *\".*:\)\(.*\)\"|\1${useImage}\"|g" )
+    fi
+
+    # If in test mode output $DEF
+    if [ "$BASH_SOURCE" != "$0" ]; then
+      echo $DEF
+    fi
+    NEW_DEF=$DEF
 }
 
 function createNewTaskDefJson() {
@@ -281,6 +310,7 @@ function createNewTaskDefJson() {
     if [ "$BASH_SOURCE" != "$0" ]; then
       echo $NEW_DEF
     fi
+
 }
 
 function filterTaskDefJson() {
@@ -388,6 +418,7 @@ function updateService() {
 
             sleep $every
             i=$(( $i + $every ))
+            echo -n '.'
         done
 
         if [[ "${UPDATE_SERVICE_SUCCESS}" != "true" ]]; then
@@ -415,11 +446,13 @@ function waitForGreenDeployment {
     # Wait to see if more than 1 deployment stays running
     # If the wait time has passed, we need to roll back
     if [ $NUM_DEPLOYMENTS -eq 1 ]; then
+      echo
       echo "Service deployment successful."
       DEPLOYMENT_SUCCESS="true"
       # Exit the loop.
       i=$TIMEOUT
     else
+      echo -n '.'
       sleep $every
       i=$(( $i + $every ))
     fi
@@ -544,7 +577,7 @@ if [ "$BASH_SOURCE" == "$0" ]; then
     # Check that required arguments are provided
     assertRequiredArgumentsSet
 
-    if ! [[ $IMAGE == false ]]; then
+    if [[ $IMAGE != false ]] || [[ "$TAGONLY" != "" ]]; then
         # Determine image name
         parseImageName
         echo "Using image name: $useImage"
@@ -554,11 +587,17 @@ if [ "$BASH_SOURCE" == "$0" ]; then
     getCurrentTaskDefinition
     echo "Current task definition: $TASK_DEFINITION_ARN";
 
+    # Use file as task definition if provided
+    getTaskDefinitionByFile
     # create new task definition json
-    if ! [[ $IMAGE == false ]]; then
-      createNewTaskDefJson
+    if [ $TASK_DEFINITION_FILE == false ]; then
+      if ! [[ $IMAGE == false ]]; then
+        createNewTaskDefJson
+      else
+        filterTaskDefJson
+      fi
     else
-      filterTaskDefJson
+      updateFileJson
     fi
 
     # register new task definition
